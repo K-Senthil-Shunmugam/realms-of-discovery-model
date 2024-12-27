@@ -1,0 +1,36 @@
+stages:
+  - build
+  - deploy
+
+# Build Stage
+build:
+  stage: build
+  tags: 
+    - general-shell
+  script:
+    # Build Docker image 
+    - docker build -t $CI_PROJECT_NAME:$CI_COMMIT_REF_NAME .
+    - echo "Build Successful and container created"
+
+# Deploy Stage
+deploy:
+  stage: deploy
+  tags:
+    - general-shell
+  script:
+    # Define container name (use a consistent naming format for the container)
+    - CONTAINER_NAME="$CI_PROJECT_NAME"
+
+    # Remove any existing container with the same name (force removal if running)
+    - docker ps -a -q --filter "name=$CONTAINER_NAME" | xargs -r docker rm -f
+    
+    # Run the new container with the specified container name and exposed port
+    - docker run -d --name $CONTAINER_NAME -p 5000:5000 --restart unless-stopped $CI_PROJECT_NAME:$CI_COMMIT_REF_NAME
+
+    # Optionally, remove dangling images after deploy
+    - docker image prune -f
+
+    # Verify if the container is running
+    - docker ps
+  only:
+    - main  # Trigger deploy only when changes are pushed to the main branch
