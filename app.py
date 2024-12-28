@@ -4,6 +4,9 @@ import mlflow.keras
 import pickle
 import numpy as np
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+import redis
+import hashlib
+import json
 
 # Set up Flask app
 app = Flask(__name__)
@@ -14,6 +17,7 @@ mlflow.set_experiment("seq2seq-model")
 
 run_id = "16c8c648ebb24b37b88b20c6bc960ce6"
 # Load the model from the specified run ID
+
 model_uri = f"runs:/{run_id}/model"
 model = mlflow.keras.load_model(model_uri)
 
@@ -25,6 +29,13 @@ with open(tokenizer_artifact_path, 'rb') as f:
 label_encoder_artifact_path = mlflow.artifacts.download_artifacts(f"runs:/{run_id}/artifacts/label_encoder/label_encoder.pkl")
 with open(label_encoder_artifact_path, 'rb') as f:
     label_encoder = pickle.load(f)
+
+# Set up Redis connection
+redis_client = redis.StrictRedis(host='192.168.192.25', port=6379, db=0, decode_responses=True)
+
+# Function to generate a cache key based on command
+def generate_cache_key(command):
+    return hashlib.md5(command.encode('utf-8')).hexdigest()
 
 # Function for prediction
 def predict_command(command):
@@ -42,10 +53,21 @@ def predict():
         data = request.get_json()
         command = data['command']
         
-        # Make prediction
-        predicted_label = predict_command(command)
+        # Check if the result is in the cache
+        cache_key = generate_cache_key(command)
+        cached_result = redis_client.get(cache_key)
         
-        return jsonify({"predicted_label": predicted_label}), 200
+        if cached_result:
+            # Return the cached result
+            return jsonify({"command": cached_result, "source": "cache"}), 200
+        else:
+            # Make prediction
+            predicted_label = predict_command(command)
+            
+            # Store the result in the cache for future use
+            redis_client.set(cache_key, predicted_label, ex=3600)  # Expiry set to 1 hour
+            
+            return jsonify({"command": predicted_label, "source": "model"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
