@@ -1,78 +1,55 @@
 from flask import Flask, request, jsonify
-import mlflow.pyfunc
-import tensorflow as tf
+import mlflow
+import mlflow.keras
+import pickle
 import numpy as np
-import json
-from mlflow.tracking import MlflowClient
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-# Initialize the Flask app
+# Set up Flask app
 app = Flask(__name__)
 
-# Set up MLflow tracking URI
+# Set the tracking URI for MLflow server
 mlflow.set_tracking_uri("http://192.168.192.25:5600")
+mlflow.set_experiment("seq2seq-model")
 
-# Fetch the run ID for the specified run name
-try:
-    client = MlflowClient()
-    experiment_id = client.get_experiment_by_name("seq2seq-model").experiment_id
+run_id = "16c8c648ebb24b37b88b20c6bc960ce6"
+# Load the model from the specified run ID
 
-    # List all runs in the experiment
-    runs = client.search_runs(experiment_ids=experiment_id, filter_string="tags.mlflow.runName = 'v1'")
-    if runs:
-        run_id = runs[0].info.run_id
-        print(f"Run ID: {run_id}")
-    else:
-        raise ValueError("Run with the specified name not found.")
+model_uri = f"runs:/{run_id}/model"
+model = mlflow.keras.load_model(model_uri)
 
-    # Load the MLflow model and tokenizer artifacts
-    artifact_path = "seq2seq_model"  # Replace with the logged model artifact path
-    model_uri = f"runs:/{run_id}/{artifact_path}"
-    model = mlflow.pyfunc.load_model(model_uri)
-    print(f"Model loaded successfully from {model_uri}")
+# Load the tokenizer and label encoder artifacts
+tokenizer_artifact_path = mlflow.artifacts.download_artifacts(f"runs:/{run_id}/artifacts/tokenizer/tokenizer.pkl")
+with open(tokenizer_artifact_path, 'rb') as f:
+    tokenizer = pickle.load(f)
 
-    # Load tokenizer from MLflow artifacts
-    tokenizer_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="tokenizer/tokenizer.json")
-    with open(tokenizer_path, 'r') as f:
-        tokenizer_data = json.load(f)
-    input_tokenizer = tf.keras.preprocessing.text.tokenizer_from_json(tokenizer_data['input_tokenizer'])
-    output_tokenizer = tf.keras.preprocessing.text.tokenizer_from_json(tokenizer_data['output_tokenizer'])
-    print("Tokenizers loaded successfully.")
-except Exception as e:
-    print(f"Error loading model or tokenizers: {e}")
-    model = None
-    input_tokenizer = None
-    output_tokenizer = None
+label_encoder_artifact_path = mlflow.artifacts.download_artifacts(f"runs:/{run_id}/artifacts/label_encoder/label_encoder.pkl")
+with open(label_encoder_artifact_path, 'rb') as f:
+    label_encoder = pickle.load(f)
 
+# Function for prediction
+def predict_command(command):
+    sequence = tokenizer.texts_to_sequences([command])
+    padded_sequence = pad_sequences(sequence, padding='post', maxlen=5)  
+    prediction = model.predict(padded_sequence)
+    predicted_label = np.argmax(prediction, axis=1)
+    return label_encoder.inverse_transform(predicted_label)[0]
+
+# Define the prediction route
 @app.route('/predict', methods=['POST'])
 def predict():
-    if model is None or input_tokenizer is None or output_tokenizer is None:
-
-        return jsonify({"error": "Model or tokenizers are not loaded."}), 500
-
     try:
-        # Parse input JSON
-        input_data = request.get_json()
-        input_texts = input_data.get("input_texts", [])
-
-        # Preprocess input texts
-        input_sequences = input_tokenizer.texts_to_sequences(input_texts)
-        max_encoder_seq_length = 26
-        encoder_input_data = tf.keras.preprocessing.sequence.pad_sequences(input_sequences, maxlen=max_encoder_seq_length, padding='post')
-
-        # Perform inference
-        predictions = model.predict([encoder_input_data])
-        output_sequences = np.argmax(predictions, axis=-1)
-
-        # Convert predicted sequences back to text
-        output_texts = []
-        for sequence in output_sequences:
-            tokens = [output_tokenizer.index_word.get(token, '') for token in sequence if token != 0]
-            output_texts.append(''.join(tokens).replace('<end>', ''))
-
-        return jsonify({"predictions": output_texts})
+        # Get the input command from JSON request
+        data = request.get_json()
+        command = data['command']
+        
+        # Make prediction
+        predicted_label = predict_command(command)
+        
+        return jsonify({"command": command, "predicted_label": predicted_label}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-# Run the app
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5500)
+if __name__ == "__main__":
+    # Run the Flask app on port 5500
+    app.run(host="0.0.0.0", port=5500)
