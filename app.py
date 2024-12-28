@@ -45,7 +45,7 @@ def predict():
         # Make prediction
         predicted_label = predict_command(command)
         
-        return jsonify({"command": command, "predicted_label": predicted_label}), 200
+        return jsonify({"predicted_label": predicted_label}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
