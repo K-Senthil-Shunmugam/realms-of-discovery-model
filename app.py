@@ -1,53 +1,77 @@
 from flask import Flask, request, jsonify
+import mlflow.pyfunc
 import tensorflow as tf
-import pickle
 import numpy as np
-from tensorflow.keras.preprocessing.sequence import pad_sequences
+import json
+from mlflow.tracking import MlflowClient
 
-# Load the trained model and tokenizers
-model = tf.keras.models.load_model('seq2seq_model.h5')
-
-with open('source_tokenizer.pkl', 'rb') as f:
-    source_tokenizer = pickle.load(f)
-
-with open('target_tokenizer.pkl', 'rb') as f:
-    target_tokenizer = pickle.load(f)
-
-# Define maximum lengths
-max_source_len = 100  # Adjust as per your model's configuration
-max_target_len = 100  # Adjust as per your model's configuration
-
-# Initialize Flask app
+# Initialize the Flask app
 app = Flask(__name__)
 
-# Helper function to convert sequences to text
-def sequences_to_text(sequences, tokenizer):
-    return [' '.join([tokenizer.index_word.get(i, '') for i in seq if i != 0]) for seq in sequences]
+# Set up MLflow tracking URI
+mlflow.set_tracking_uri("http://192.168.192.25:5600")
 
-# Route to generate predictions
+# Fetch the run ID for the specified run name
+try:
+    client = MlflowClient()
+    experiment_id = client.get_experiment_by_name("seq2seq-model").experiment_id
+
+    # List all runs in the experiment
+    runs = client.search_runs(experiment_ids=experiment_id, filter_string="tags.mlflow.runName = 'seq2seq-v1'")
+    if runs:
+        run_id = runs[0].info.run_id
+        print(f"Run ID: {run_id}")
+    else:
+        raise ValueError("Run with the specified name not found.")
+
+    # Load the MLflow model and tokenizer artifacts
+    artifact_path = "seq2seq_model"  # Replace with the logged model artifact path
+    model_uri = f"runs:/{run_id}/{artifact_path}"
+    model = mlflow.pyfunc.load_model(model_uri)
+    print(f"Model loaded successfully from {model_uri}")
+
+    # Load tokenizer from MLflow artifacts
+    tokenizer_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="tokenizer/tokenizer.json")
+    with open(tokenizer_path, 'r') as f:
+        tokenizer_data = json.load(f)
+    input_tokenizer = tf.keras.preprocessing.text.tokenizer_from_json(tokenizer_data['input_tokenizer'])
+    output_tokenizer = tf.keras.preprocessing.text.tokenizer_from_json(tokenizer_data['output_tokenizer'])
+    print("Tokenizers loaded successfully.")
+except Exception as e:
+    print(f"Error loading model or tokenizers: {e}")
+    model = None
+    input_tokenizer = None
+    output_tokenizer = None
+
 @app.route('/predict', methods=['POST'])
 def predict():
-    data = request.get_json()
-    
-    # Extract the input text from the request
-    source_text = data.get('input_text', '')
-    
-    # Tokenize the source text
-    source_sequence = source_tokenizer.texts_to_sequences([source_text])
-    source_sequence = pad_sequences(source_sequence, maxlen=max_source_len, padding='post')
-    
-    # Prepare the decoder input (empty start token)
-    target_sequence = np.zeros((1, max_target_len - 1))
+    if model is None or input_tokenizer is None or output_tokenizer is None:
+        return jsonify({"error": "Model or tokenizers are not loaded."}), 500
 
-    # Generate prediction
-    prediction = model.predict([source_sequence, target_sequence])
-    
-    # Convert predicted sequence to text
-    predicted_sequence = np.argmax(prediction, axis=-1)
-    predicted_text = sequences_to_text(predicted_sequence, target_tokenizer)[0]
-    
-    # Return the predicted text as a JSON response
-    return jsonify({'predicted_text': predicted_text})
+    try:
+        # Parse input JSON
+        input_data = request.get_json()
+        input_texts = input_data.get("input_texts", [])
 
+        # Preprocess input texts
+        input_sequences = input_tokenizer.texts_to_sequences(input_texts)
+        max_encoder_seq_length = model.metadata.get('max_encoder_seq_length', 100)  # Replace with known value if available
+        encoder_input_data = tf.keras.preprocessing.sequence.pad_sequences(input_sequences, maxlen=max_encoder_seq_length, padding='post')
+
+        # Perform inference
+        predictions = model.predict([encoder_input_data])
+        output_sequences = np.argmax(predictions, axis=-1)
+
+        # Convert predicted sequences back to text
+        output_texts = []
+        for sequence in output_sequences:
+            tokens = [output_tokenizer.index_word.get(token, '') for token in sequence if token != 0]
+            output_texts.append(''.join(tokens).replace('<end>', ''))
+
+        return jsonify({"predictions": output_texts})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+# Run the app
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5500)
+    app.run(host='0.0.0.0', port=5500)

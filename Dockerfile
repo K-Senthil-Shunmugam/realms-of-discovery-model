@@ -11,7 +11,6 @@ COPY . /app
 RUN pip install --upgrade --ignore-installed --no-cache-dir blinker
 RUN pip install --no-cache-dir -r requirements.txt
 
-
 # Expose port 5500 to allow communication with the Flask app
 EXPOSE 5500
 
