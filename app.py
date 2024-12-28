@@ -56,7 +56,7 @@ def predict():
 
         # Preprocess input texts
         input_sequences = input_tokenizer.texts_to_sequences(input_texts)
-        max_encoder_seq_length = 100
+        max_encoder_seq_length = 26
         encoder_input_data = tf.keras.preprocessing.sequence.pad_sequences(input_sequences, maxlen=max_encoder_seq_length, padding='post')
 
         # Perform inference
