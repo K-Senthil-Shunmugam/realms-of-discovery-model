@@ -1,5 +1,5 @@
 # Use an official Python runtime as a base image
-FROM tensorflow/tensorflow:2.11.0-slim
+FROM tensorflow/tensorflow:latest
 
 # Set the working directory inside the container
 WORKDIR /app
