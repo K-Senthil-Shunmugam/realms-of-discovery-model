@@ -17,7 +17,7 @@ try:
     experiment_id = client.get_experiment_by_name("seq2seq-model").experiment_id
 
     # List all runs in the experiment
-    runs = client.search_runs(experiment_ids=experiment_id, filter_string="tags.mlflow.runName = 'seq2seq-v1'")
+    runs = client.search_runs(experiment_ids=experiment_id, filter_string="tags.mlflow.runName = 'v1'")
     if runs:
         run_id = runs[0].info.run_id
         print(f"Run ID: {run_id}")
@@ -46,6 +46,7 @@ except Exception as e:
 @app.route('/predict', methods=['POST'])
 def predict():
     if model is None or input_tokenizer is None or output_tokenizer is None:
+
         return jsonify({"error": "Model or tokenizers are not loaded."}), 500
 
     try:
