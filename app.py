@@ -14,7 +14,6 @@ mlflow.set_experiment("seq2seq-model")
 
 run_id = "16c8c648ebb24b37b88b20c6bc960ce6"
 # Load the model from the specified run ID
-
 model_uri = f"runs:/{run_id}/model"
 model = mlflow.keras.load_model(model_uri)
 
@@ -46,7 +45,7 @@ def predict():
         # Make prediction
         predicted_label = predict_command(command)
         
-        return jsonify({"command": predicted_label}), 200
+        return jsonify({"command": command, "predicted_label": predicted_label}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
