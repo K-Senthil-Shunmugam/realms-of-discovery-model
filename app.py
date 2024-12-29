@@ -52,6 +52,7 @@ def predict_command(command, threshold=0.5):
     
     # Check if the maximum probability is below the threshold
     if np.max(probabilities) < threshold:
+        
         print(np.max(probabilities))
         return command  # Return the input if probability is below the threshold
     
