@@ -38,12 +38,25 @@ def generate_cache_key(command):
     return hashlib.md5(command.encode('utf-8')).hexdigest()
 
 # Function for prediction
-def predict_command(command):
+def predict_command(command, threshold=0.5):
+    # Convert the command to sequence of integers
     sequence = tokenizer.texts_to_sequences([command])
-    padded_sequence = pad_sequences(sequence, padding='post', maxlen=5)  
+    # Pad the sequence to the specified length
+    padded_sequence = pad_sequences(sequence, padding='post', maxlen=5)
+    
+    # Predict the class probabilities
     prediction = model.predict(padded_sequence)
-    predicted_label = np.argmax(prediction, axis=1)
-    return label_encoder.inverse_transform(predicted_label)[0]
+    
+    # Get the class probabilities for all classes
+    probabilities = prediction[0]
+    
+    # Check if the maximum probability is below the threshold
+    if np.max(probabilities) < threshold:
+        return command  # Return the input if probability is below the threshold
+    
+    # Otherwise, return the label of the predicted class
+    predicted_label = np.argmax(probabilities)
+    return label_encoder.inverse_transform([predicted_label])[0]
 
 # Define the prediction route
 @app.route('/predict', methods=['POST'])
